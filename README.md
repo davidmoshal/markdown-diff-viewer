@@ -146,6 +146,22 @@ md-diff --git main develop
 
 This creates a multi-file viewer with a dropdown to switch between files.
 
+`--git` compares the two refs directly (`git diff <ref1> <ref2>`), so the order does not matter and the file list matches the content shown. `--pr` lists only the PR's own changes (since the merge base).
+
+### Serve Mode
+
+Serve the viewer locally and pick both sides from dropdowns in the page header:
+
+```bash
+md-diff --serve @~1              # Start at HEAD~1 vs HEAD
+md-diff --serve @HEAD            # Start at HEAD vs working directory
+md-diff --serve --git v1.0 v2.0 README.md
+```
+
+The dropdowns list recent commits that changed `.md` files; the right one also offers the working directory. Each change re-runs md-diff and loads the result in the same tab, so the browser's back and forward buttons step through earlier comparisons. The selected file stays selected; when it did not change between the picked commits it is still listed, marked "no changes".
+
+`--focus <file>` opens any git-mode page on that file, listing it even when unchanged.
+
 ### Output Options
 
 ```bash

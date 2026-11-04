@@ -13,7 +13,7 @@ _md_diff_completions() {
     cur="\${COMP_WORDS[COMP_CWORD]}"
     prev="\${COMP_WORDS[COMP_CWORD-1]}"
 
-    opts="--help --version --out --theme --quiet --watch --preview --json --copy --no-open --debug --inspect --git --compare --staged --pr"
+    opts="--help --version --out --theme --quiet --watch --preview --json --copy --no-open --debug --inspect --git --compare --staged --pr --serve --focus"
 
     case "$prev" in
         --theme|-t)
@@ -166,6 +166,8 @@ _md-diff() {
         '--compare[Compare working dir to branch]:branch:_md-diff_branches' \\
         '--staged[Compare staged changes to HEAD]' \\
         '--pr[Compare markdown files in a PR]:PR number:' \\
+        '--serve[Serve locally and pick commits in the page]' \\
+        '--focus[Open on this file]:file:->files' \\
         '*:file:->files'
 
     case "$state" in
@@ -208,6 +210,8 @@ complete -c md-diff -l inspect -d 'Open in Chrome with remote debugging'
 complete -c md-diff -l staged -d 'Compare staged changes to HEAD'
 complete -c md-diff -l compare -x -a '(git branch -a 2>/dev/null | sed "s/^[* ]*//" | sed "s/remotes\\///" )' -d 'Compare working dir to branch'
 complete -c md-diff -l pr -x -d 'Compare markdown files in a PR'
+complete -c md-diff -l serve -d 'Serve locally and pick commits in the page'
+complete -c md-diff -l focus -x -a '(__md-diff_fuzzy_files)' -d 'Open on this file'
 complete -c md-diff -l git -x -a '(git for-each-ref --format="%(refname:short)" 2>/dev/null; echo HEAD; echo HEAD~1; echo HEAD~2; echo HEAD~3)' -d 'Compare between git refs'
 
 function __md_diff_git_shortcuts

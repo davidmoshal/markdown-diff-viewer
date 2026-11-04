@@ -75,6 +75,8 @@ _md-diff() {
         '--compare[Compare working dir to branch]:branch:_md-diff_branches' \
         '--staged[Compare staged changes to HEAD]' \
         '--pr[Compare markdown files in a PR]:PR number:' \
+        '--serve[Serve locally and pick commits in the page]' \
+        '--focus[Open on this file]:file:->files' \
         '*:file:->files'
 
     case "$state" in

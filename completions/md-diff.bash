@@ -8,7 +8,7 @@ _md_diff_completions() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    opts="--help --version --out --theme --quiet --watch --preview --json --copy --no-open --debug --git --compare --staged --pr"
+    opts="--help --version --out --theme --quiet --watch --preview --json --copy --no-open --debug --git --compare --staged --pr --serve --focus"
 
     case "$prev" in
         --theme|-t)

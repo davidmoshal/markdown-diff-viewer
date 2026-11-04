@@ -109,20 +109,27 @@ function parseNumstatLines(lines: string[]): Map<string, { added: number; remove
 }
 
 /**
- * The revision-range argument for `git diff`: a single ref when comparing
- * against the working directory, `ref1...ref2` otherwise.
+ * The revision-range arguments for `git diff`: a single ref when comparing
+ * against the working directory; otherwise `ref1...ref2` (changes since their
+ * merge base, as a PR shows them) or `ref1 ref2` (the two commits directly).
  */
-function diffRange(ref1: string, ref2: string, isWorkingDir: boolean): string {
-  return isWorkingDir ? ref1 : `${ref1}...${ref2}`;
+function diffRange(ref1: string, ref2: string, isWorkingDir: boolean, mergeBase: boolean): string[] {
+  if (isWorkingDir) return [ref1];
+  return mergeBase ? [`${ref1}...${ref2}`] : [ref1, ref2];
 }
 
 /**
  * Get line stats (added/removed) for files from git numstat.
  */
-function getNumstat(ref1: string, ref2: string, isWorkingDir = false): Map<string, { added: number; removed: number }> {
+function getNumstat(
+  ref1: string,
+  ref2: string,
+  isWorkingDir = false,
+  mergeBase = true,
+): Map<string, { added: number; removed: number }> {
   try {
-    const range = diffRange(ref1, ref2, isWorkingDir);
-    return parseNumstatLines(gitLines(["diff", "-M", "--numstat", range, "--", "*.md"]));
+    const range = diffRange(ref1, ref2, isWorkingDir, mergeBase);
+    return parseNumstatLines(gitLines(["diff", "-M", "--numstat", ...range, "--", "*.md"]));
   } catch {
     return new Map();
   }
@@ -168,14 +175,20 @@ function parseNameStatusLines(
 
 /**
  * Get changed markdown files with rename detection.
- * Uses git's -M flag to detect renames.
+ * Uses git's -M flag to detect renames. With `mergeBase` (the default) two
+ * refs compare from their merge base; without it they compare directly.
  */
-export function getChangedMdFilesWithRenames(ref1: string, ref2: string, isWorkingDir = false): ChangedFile[] {
+export function getChangedMdFilesWithRenames(
+  ref1: string,
+  ref2: string,
+  isWorkingDir = false,
+  mergeBase = true,
+): ChangedFile[] {
   try {
     // Use --name-status to get status codes, -M to detect renames
-    const range = diffRange(ref1, ref2, isWorkingDir);
-    const lines = gitLines(["diff", "-M", "--name-status", "--diff-filter=ACMRD", range, "--", "*.md"]);
-    const numstats = getNumstat(ref1, ref2, isWorkingDir);
+    const range = diffRange(ref1, ref2, isWorkingDir, mergeBase);
+    const lines = gitLines(["diff", "-M", "--name-status", "--diff-filter=ACMRD", ...range, "--", "*.md"]);
+    const numstats = getNumstat(ref1, ref2, isWorkingDir, mergeBase);
     return parseNameStatusLines(lines, numstats);
   } catch {
     return [];
@@ -218,6 +231,51 @@ export function getUntrackedMdFiles(): string[] {
   }
 }
 
+/**
+ * A commit as the --serve pickers list it.
+ */
+export interface CommitInfo {
+  hash: string;
+  short: string;
+  /** Committer time, seconds since the epoch */
+  time: number;
+  /** Ref names pointing at the commit, e.g. "HEAD -> main, origin/main" */
+  refs: string;
+  subject: string;
+}
+
+const COMMIT_FORMAT = "--format=%H%x09%h%x09%ct%x09%D%x09%s";
+
+function parseCommitLines(lines: string[]): CommitInfo[] {
+  return lines.map((line) => {
+    const [hash, short, time, refs, ...subject] = line.split("\t");
+    return { hash, short, time: parseInt(time, 10), refs, subject: subject.join("\t") };
+  });
+}
+
+/**
+ * The most recent commits on HEAD that changed a markdown file.
+ */
+export function getRecentMdCommits(limit: number): CommitInfo[] {
+  try {
+    return parseCommitLines(gitLines(["log", `--max-count=${limit}`, COMMIT_FORMAT, "--", "*.md"]));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Resolve a ref to its commit, or null when it names no commit.
+ */
+export function getCommitInfo(ref: string): CommitInfo | null {
+  if (ref.startsWith("-")) return null;
+  try {
+    return parseCommitLines(gitLines(["log", "-1", COMMIT_FORMAT, `${ref}^{commit}`, "--"]))[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export interface PrInfo {
   baseRef: string;
   headRef: string;
@@ -257,8 +315,14 @@ export function fetchRefs(refs: string[]): void {
  * Find the old path for a file if it was renamed between two refs.
  * Returns the old path if renamed, or undefined if not renamed.
  */
-export function findOldPath(ref1: string, ref2: string, newPath: string, isWorkingDir = false): string | undefined {
-  const range = diffRange(ref1, ref2, isWorkingDir);
+export function findOldPath(
+  ref1: string,
+  ref2: string,
+  newPath: string,
+  isWorkingDir = false,
+  mergeBase = true,
+): string | undefined {
+  const range = diffRange(ref1, ref2, isWorkingDir, mergeBase);
 
   const findRename = (lines: string[]): string | undefined => {
     for (const line of lines) {
@@ -273,12 +337,12 @@ export function findOldPath(ref1: string, ref2: string, newPath: string, isWorki
 
   try {
     // Use git diff with -M to detect renames, filter for the specific file
-    const filtered = findRename(gitLines(["diff", "-M", "--name-status", "--diff-filter=R", range, "--", newPath]));
+    const filtered = findRename(gitLines(["diff", "-M", "--name-status", "--diff-filter=R", ...range, "--", newPath]));
     if (filtered) return filtered;
 
     // If not found by filtering for newPath, search all renames
     // (git may not match when filtering by new path in some cases)
-    return findRename(gitLines(["diff", "-M", "--name-status", "--diff-filter=R", range]));
+    return findRename(gitLines(["diff", "-M", "--name-status", "--diff-filter=R", ...range]));
   } catch {
     return undefined;
   }

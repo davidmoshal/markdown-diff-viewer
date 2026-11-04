@@ -18,6 +18,10 @@ export interface UISettings {
 
 export interface FileDiff {
   path: string;
+  /** Path that identifies the file across pages (a rename's new path); defaults to path */
+  key?: string;
+  /** Listed only because it is the --focus file: same content on both sides */
+  pinned?: boolean;
   rows: RenderedRow[];
   /** Lines added (from git) */
   added?: number;
@@ -25,6 +29,20 @@ export interface FileDiff {
   removed?: number;
   /** Pre-computed rows at different matching levels (for UI switching) */
   rowsByLevel?: Record<MatchingLevel, RenderedRow[]>;
+}
+
+/** One entry in a header commit picker */
+export interface RefOption {
+  value: string;
+  label: string;
+}
+
+/** Header commit pickers on --serve pages; they replace the side titles */
+export interface RefPicker {
+  left: RefOption[];
+  right: RefOption[];
+  leftValue: string;
+  rightValue: string;
 }
 
 // ── Components ─────────────────────────────────────────────────
@@ -87,7 +105,7 @@ function FileStats({ added, removed }: { added?: number; removed?: number }) {
   );
 }
 
-function FileSidebar({ files }: { files: FileDiff[] }) {
+function FileSidebar({ files, activeIdx }: { files: FileDiff[]; activeIdx: number }) {
   const groups = groupFilesByDirectory(files);
 
   return (
@@ -106,13 +124,16 @@ function FileSidebar({ files }: { files: FileDiff[] }) {
             )}
             {group.files.map(({ file, idx }) => (
               <li
-                class={`file-item${idx === 0 ? " active" : ""}${group.dir ? " indented" : ""}`}
+                class={`file-item${idx === activeIdx ? " active" : ""}${group.dir ? " indented" : ""}`}
                 data-file-idx={String(idx)}
                 data-full-path={file.path}
+                data-path={file.key ?? file.path}
                 tabindex="0"
               >
                 <span class="file-name">{getFilename(file.path)}</span>
-                <FileStats added={file.added} removed={file.removed} />
+                {file.pinned
+                  ? <span class="file-unchanged">no changes</span>
+                  : <FileStats added={file.added} removed={file.removed} />}
               </li>
             ))}
           </>
@@ -123,10 +144,10 @@ function FileSidebar({ files }: { files: FileDiff[] }) {
   );
 }
 
-function FilePathDisplay({ files }: { files: FileDiff[] }) {
+function FilePathDisplay({ files, activeIdx }: { files: FileDiff[]; activeIdx: number }) {
   return (
     <div class="file-path-display" id="filePathDisplay">
-      <span class="current-file-path">{files[0]?.path || ""}</span>
+      <span class="current-file-path">{files[activeIdx]?.path || ""}</span>
     </div>
   );
 }
@@ -159,14 +180,24 @@ function DiffPane({
   );
 }
 
-function FileDiffView({ file, idx, initialLevel }: { file: FileDiff; idx: number; initialLevel: MatchingLevel }) {
+function FileDiffView({
+  file,
+  idx,
+  initialLevel,
+  visible,
+}: {
+  file: FileDiff;
+  idx: number;
+  initialLevel: MatchingLevel;
+  visible: boolean;
+}) {
   const hasMultipleLevels = file.rowsByLevel && Object.keys(file.rowsByLevel).length > 1;
 
   return (
     <div
       class="file-diff"
       data-file-idx={String(idx)}
-      style={idx > 0 ? "display:none" : undefined}
+      style={visible ? undefined : "display:none"}
     >
       {hasMultipleLevels ? (
         // Render all matching level variants
@@ -197,21 +228,37 @@ function FileDiffView({ file, idx, initialLevel }: { file: FileDiff; idx: number
   );
 }
 
+function RefSelect({ id, label, options, value }: { id: string; label: string; options: RefOption[]; value: string }) {
+  return (
+    <select id={id} class="ref-select" aria-label={label} autocomplete="off">
+      {options.map((o) => (
+        <option value={o.value} selected={o.value === value} safe>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function Header({
   leftTitle,
   rightTitle,
   projectRoot,
   command,
+  refPicker,
 }: {
   leftTitle: string;
   rightTitle: string;
   projectRoot?: string;
   command?: string;
+  refPicker?: RefPicker;
 }) {
   return (
     <header>
       <div class="header-cell left-header">
-        {leftTitle}
+        {refPicker
+          ? <RefSelect id="leftRef" label="Left commit" options={refPicker.left} value={refPicker.leftValue} />
+          : leftTitle}
         {projectRoot && (
           <span class="project-root" title={projectRoot} data-path={projectRoot}>
             {projectRoot}
@@ -220,7 +267,9 @@ function Header({
       </div>
       <div class="header-cell right-header">
         <span class="header-title-group">
-          {rightTitle}
+          {refPicker
+            ? <RefSelect id="rightRef" label="Right commit" options={refPicker.right} value={refPicker.rightValue} />
+            : rightTitle}
           {command && (
             <span class="header-command" title={`md-diff ${command}`}>
               {"md-diff " + command}
@@ -337,6 +386,10 @@ export interface HtmlOptions {
   uiSettings?: UISettings;
   projectRoot?: string;
   command?: string;
+  /** Commit pickers in place of the side titles (--serve) */
+  refPicker?: RefPicker;
+  /** Key of the file to show first; the first file when absent or not found */
+  focus?: string;
 }
 
 export function generateHtml(
@@ -348,10 +401,12 @@ export function generateHtml(
 }
 
 export function generateMultiFileHtml(files: FileDiff[], options: HtmlOptions): string {
-  const { leftTitle, rightTitle, theme = "dark", uiSettings, projectRoot, command } = options;
+  const { leftTitle, rightTitle, theme = "dark", uiSettings, projectRoot, command, refPicker, focus } = options;
   const darkVars = themeVars(themes.dark);
   const solarVars = themeVars(themes.solar);
-  const isMulti = files.length > 1;
+  // Served pages always show the file list, so the selected file stays visible across commits
+  const showSidebar = files.length > 1 || refPicker !== undefined;
+  const focusIdx = Math.max(0, files.findIndex((f) => (f.key ?? f.path) === focus));
   const initialLevel: MatchingLevel = uiSettings?.matchLevel ?? "normal";
 
   // Embed initial settings as a data attribute for JS to pick up
@@ -369,14 +424,21 @@ export function generateMultiFileHtml(files: FileDiff[], options: HtmlOptions): 
         />
         <style>{cssText(darkVars, solarVars) as "safe"}</style>
       </head>
-      <body class={isMulti ? "multi-file" : ""}>
-        {isMulti && <FileSidebar files={files} />}
+      <body class={showSidebar ? "multi-file" : ""} data-focus-idx={String(focusIdx)}>
+        {showSidebar && <FileSidebar files={files} activeIdx={focusIdx} />}
         <div class="main-content">
-          <Header leftTitle={leftTitle} rightTitle={rightTitle} projectRoot={projectRoot} command={command} />
-          {isMulti && <FilePathDisplay files={files} />}
+          <Header
+            leftTitle={leftTitle}
+            rightTitle={rightTitle}
+            projectRoot={projectRoot}
+            command={command}
+            refPicker={refPicker}
+          />
+          {showSidebar && <FilePathDisplay files={files} activeIdx={focusIdx} />}
           {files.map((f, i) => (
-            <FileDiffView file={f} idx={i} initialLevel={initialLevel} />
+            <FileDiffView file={f} idx={i} initialLevel={initialLevel} visible={i === focusIdx} />
           ))}
+          {files.length === 0 && <div class="empty-state">No .md changes between these sides</div>}
           <div class="stats-bar" id="statsBar" />
         </div>
         <div id="minimap">

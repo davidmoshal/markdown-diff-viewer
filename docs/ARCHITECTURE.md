@@ -8,6 +8,7 @@ markdown-diff-viewer is both a **CLI** and a **library**. The algorithm is host-
 ┌─────────────────────────────────────────────────────────────┐
 │ CLI (`src/cli/`)                                            │
 │   argv, watch, clipboard, terminal colors, completions      │
+│   serve: local server for the commit pickers                │
 ├─────────────────────────────────────────────────────────────┤
 │ Adapters                                                    │
 │   git/     Node child_process helpers                       │

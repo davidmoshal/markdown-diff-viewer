@@ -150,6 +150,13 @@ export function cssText(darkVars: string, solarVars: string): string {
     color: var(--md-removed-border);
   }
 
+  .file-unchanged {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--md-text-muted);
+    opacity: 0.7;
+  }
+
   /* Sidebar resize handle */
   .sidebar-resize {
     position: absolute;
@@ -252,6 +259,33 @@ export function cssText(darkVars: string, solarVars: string): string {
     display: flex;
     align-items: center;
     justify-content: space-between;
+  }
+
+  /* Commit pickers (--serve) */
+  .ref-select {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 32em;
+    background: var(--md-bg);
+    border: 1px solid var(--md-border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-family: var(--font-mono, 'SF Mono', 'Fira Code', 'Fira Mono', monospace);
+    font-size: 12px;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--md-text);
+    cursor: pointer;
+  }
+
+  .empty-state {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--md-text-muted);
+    font-size: 14px;
   }
 
   .header-controls {

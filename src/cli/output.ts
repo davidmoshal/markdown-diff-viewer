@@ -8,7 +8,7 @@ import { homedir, tmpdir } from "node:os";
 import { execSync, spawn } from "node:child_process";
 import type { DiffPair } from "../core/diff.js";
 import type { RenderedRow } from "../render/render.js";
-import { generateHtml, generateMultiFileHtml, type FileDiff, type UISettings } from "../ui/template.js";
+import { generateHtml, generateMultiFileHtml, type FileDiff, type RefPicker, type UISettings } from "../ui/template.js";
 import { getMatchingLevel, type MatchingLevel } from "../config.js";
 import { DIFF_SCHEMA_VERSION, toHostPayload, type DiffResult, type HostDiffPayload } from "../api.js";
 import { projectPairsToDocument } from "../model/document.js";
@@ -31,6 +31,11 @@ export interface OutputOptions {
   uiSettings?: UISettings;
   command?: string;
   matchLevel?: MatchingLevel;
+  /** File to show first; in git modes it stays listed even when unchanged */
+  focus?: string;
+  /** Render commit pickers in the header that always list these commits (set by --serve) */
+  pickRefs?: string[];
+  refPicker?: RefPicker;
 }
 
 // ─── Preview ─────────────────────────────────────────────────────────────────
@@ -342,6 +347,8 @@ export async function outputMultiFile(
     uiSettings: opts.uiSettings,
     projectRoot: opts.projectRoot,
     command: opts.command,
+    refPicker: opts.refPicker,
+    focus: opts.focus,
   });
 
   if (opts.copy) {

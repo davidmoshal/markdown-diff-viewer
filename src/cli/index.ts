@@ -5,7 +5,7 @@
  * Wires together modular components from src/cli/*.
  */
 
-import { program } from "commander";
+import { Option, program } from "commander";
 import { readFileSync, watchFile, existsSync } from "node:fs";
 import { resolve, basename } from "node:path";
 import { createInterface } from "node:readline";
@@ -35,7 +35,6 @@ import {
   expandGitShortcut,
   findOldPath,
   getGitRoot,
-  type ChangedFile,
 } from "../git/index.js";
 import {
   outputSingleFile,
@@ -45,6 +44,8 @@ import {
 } from "./output.js";
 import { getCompletion, isValidShell } from "./completions.js";
 import { runDebugPair } from "./debug-pair.js";
+import { runServeMode, buildRefPicker, WORKTREE } from "./serve.js";
+import { toMultiFileInput, withFocusFile, type MultiFileInput } from "./file-inputs.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -61,36 +62,6 @@ function loadSettingsFile(path: string): UISettings {
     logError(`Failed to load settings file: ${path}`, String(err));
     process.exit(1);
   }
-}
-
-/** Diff input for one file in multi-file mode */
-interface MultiFileInput {
-  path: string;
-  leftContent: string;
-  rightContent: string;
-  linesAdded?: number;
-  linesRemoved?: number;
-}
-
-/**
- * Resolve a changed file into diff content. Handles renames (left side reads
- * from the old path, display shows "old → new"); the modes differ only in
- * how each side's content is fetched.
- */
-function toMultiFileInput(
-  f: ChangedFile,
-  getLeft: (path: string) => string,
-  getRight: (path: string) => string,
-): MultiFileInput {
-  const leftPath = f.oldPath ?? f.path;
-  const displayPath = f.oldPath ? `${f.oldPath} → ${f.path}` : f.path;
-  return {
-    path: displayPath,
-    leftContent: getLeft(leftPath),
-    rightContent: getRight(f.path),
-    linesAdded: f.linesAdded,
-    linesRemoved: f.linesRemoved,
-  };
 }
 
 // ─── Version ─────────────────────────────────────────────────────────────────
@@ -221,7 +192,14 @@ async function runMultiFile(
     const timer = createTimer(f.path);
     const pairs = timer.time("diff", () => getPairs(f.leftContent, f.rightContent));
     const rows = timer.time("render", () => renderDiffPairs(pairs));
-    fileDiffs.push({ path: f.path, rows, added: f.linesAdded, removed: f.linesRemoved });
+    fileDiffs.push({
+      path: f.path,
+      key: f.key,
+      pinned: f.pinned,
+      rows,
+      added: f.linesAdded,
+      removed: f.linesRemoved,
+    });
     filesPairs.push({ path: f.path, pairs });
     timer.done();
   }
@@ -235,10 +213,21 @@ async function runMultiFile(
 
 // ─── Git Mode ────────────────────────────────────────────────────────────────
 
-async function runGitMode(ref1: string, ref2: string, file: string | undefined, outputOpts: OutputOptions) {
+/**
+ * Compare two refs. They compare directly (`git diff ref1 ref2`), so the file
+ * list matches the content shown for each ref; `mergeBase` instead lists only
+ * the changes on ref2 since the merge base, as a PR shows them.
+ */
+async function runGitMode(
+  ref1: string,
+  ref2: string,
+  file: string | undefined,
+  outputOpts: OutputOptions,
+  mergeBase = false,
+) {
   if (file) {
     // Check if file was renamed between refs
-    const oldPath = findOldPath(ref1, ref2, file);
+    const oldPath = findOldPath(ref1, ref2, file, false, mergeBase);
     const leftPath = oldPath ?? file;
 
     const leftContent = getGitFileContent(ref1, leftPath);
@@ -255,9 +244,19 @@ async function runGitMode(ref1: string, ref2: string, file: string | undefined, 
       right: { content: rightContent, title: ref2 },
     }, outputOpts, false);
   } else {
-    const changedFiles = getChangedMdFilesWithRenames(ref1, ref2);
+    const changedFiles = getChangedMdFilesWithRenames(ref1, ref2, false, mergeBase);
+    const getLeft = (p: string) => getGitFileContent(ref1, p);
+    const getRight = (p: string) => getGitFileContent(ref2, p);
+    const files = sortFilesByPath(withFocusFile(
+      changedFiles.map((f) => toMultiFileInput(f, getLeft, getRight)),
+      changedFiles,
+      outputOpts,
+      getLeft,
+      getRight,
+    ));
 
-    if (changedFiles.length === 0) {
+    // A served page renders even without changes, so its pickers stay usable
+    if (files.length === 0 && !outputOpts.pickRefs) {
       logInfo(`No changed .md files between ${ref1} and ${ref2}`);
       process.exit(0);
     }
@@ -266,10 +265,7 @@ async function runGitMode(ref1: string, ref2: string, file: string | undefined, 
       console.log(`Found ${c.bold}${changedFiles.length}${c.reset} changed .md file(s)`);
     }
 
-    const files = sortFilesByPath(changedFiles.map((f) =>
-      toMultiFileInput(f, (p) => getGitFileContent(ref1, p), (p) => getGitFileContent(ref2, p)),
-    ));
-
+    if (outputOpts.pickRefs) outputOpts.refPicker = buildRefPicker(ref1, ref2, outputOpts.pickRefs);
     await runMultiFile(files, ref1, ref2, outputOpts);
   }
 }
@@ -316,15 +312,6 @@ async function runCompareMode(branch: string, file: string | undefined, outputOp
       }
     }
 
-    if (changedFiles.length === 0) {
-      logInfo(`No changed .md files compared to ${branch}`);
-      process.exit(0);
-    }
-
-    if (!outputOpts.quiet) {
-      console.log(`Found ${c.bold}${changedFiles.length}${c.reset} changed .md file(s)`);
-    }
-
     const readWorkingFile = (path: string): string => {
       try {
         return readFileSync(resolve(path), "utf-8");
@@ -332,9 +319,10 @@ async function runCompareMode(branch: string, file: string | undefined, outputOp
         return ""; // File deleted
       }
     };
+    const getLeft = (p: string) => getGitFileContent(branch, p);
 
-    const files = sortFilesByPath(changedFiles.map((f) => {
-      const file = toMultiFileInput(f, (p) => getGitFileContent(branch, p), readWorkingFile);
+    const changedInputs = changedFiles.map((f) => {
+      const file = toMultiFileInput(f, getLeft, readWorkingFile);
 
       // Untracked files have no git stats: count non-empty lines as added
       // (don't count the trailing empty line from a final newline)
@@ -344,8 +332,20 @@ async function runCompareMode(branch: string, file: string | undefined, outputOp
       }
 
       return file;
-    }));
+    });
+    const files = sortFilesByPath(withFocusFile(changedInputs, changedFiles, outputOpts, getLeft, readWorkingFile));
 
+    // A served page renders even without changes, so its pickers stay usable
+    if (files.length === 0 && !outputOpts.pickRefs) {
+      logInfo(`No changed .md files compared to ${branch}`);
+      process.exit(0);
+    }
+
+    if (!outputOpts.quiet) {
+      console.log(`Found ${c.bold}${changedFiles.length}${c.reset} changed .md file(s)`);
+    }
+
+    if (outputOpts.pickRefs) outputOpts.refPicker = buildRefPicker(branch, WORKTREE, outputOpts.pickRefs);
     await runMultiFile(files, branch, "working directory", outputOpts);
   }
 }
@@ -402,7 +402,7 @@ async function runPrMode(prNumber: string, outputOpts: OutputOptions) {
     console.log(`Comparing PR #${prNumber}: ${c.dim}${prInfo.baseRef}${c.reset} → ${c.bold}${prInfo.headRef}${c.reset}`);
   }
 
-  await runGitMode(`origin/${prInfo.baseRef}`, `origin/${prInfo.headRef}`, undefined, outputOpts);
+  await runGitMode(`origin/${prInfo.baseRef}`, `origin/${prInfo.headRef}`, undefined, outputOpts, true);
 }
 
 // ─── Interactive Mode ────────────────────────────────────────────────────────
@@ -530,6 +530,9 @@ program
   .option("--compare <branch>", "Compare working dir to branch")
   .option("--staged", "Compare staged changes to HEAD")
   .option("--pr <number>", "Compare markdown files in a PR")
+  .option("--serve", "Serve the diff locally; pick both commits from dropdowns in the page")
+  .option("--focus <file>", "Open on this file; git modes list it even when unchanged")
+  .addOption(new Option("--ref-picker <commits>", "Render commit pickers that list these commits (--serve)").hideHelp())
   .option("--completions <shell>", "Output shell completion script (bash, zsh, fish)")
   .option("--debug-pair <texts...>", "Debug inline diff for a pair of texts: --debug-pair \"left\" \"right\"");
 
@@ -541,6 +544,10 @@ ${c.bold}Git Shortcuts${c.reset}
   md-diff @~3..@~1         Compare commit range
   md-diff @main            Compare working dir to main
   md-diff @origin/main     Compare working dir to origin/main
+
+${c.bold}Serve${c.reset}
+  md-diff --serve @~1      Open HEAD~1 vs HEAD; pick other commits in the page
+  md-diff --serve @HEAD    Open working dir vs HEAD
 
 ${c.bold}Examples${c.reset}
   ${c.dim}# Compare two files${c.reset}
@@ -610,6 +617,8 @@ function buildOutputOptions(options: ReturnType<typeof program.opts>, settingsFr
     projectRoot: getGitRoot() || process.cwd(),
     uiSettings,
     matchLevel,
+    focus: options.focus as string | undefined,
+    pickRefs: options.refPicker ? (options.refPicker as string).split(",") : undefined,
   };
 }
 
@@ -663,6 +672,12 @@ async function main() {
 
   const outputOpts = buildOutputOptions(options, uiSettings);
   const watch = Boolean(options.watch);
+
+  // Serve mode - local server that re-runs md-diff for picked commits
+  if (options.serve) {
+    await runServeMode(options, args, outputOpts, program.getOptionValueSource("match") === "cli");
+    return;
+  }
 
   // PR mode
   if (options.pr) {

@@ -353,6 +353,8 @@ export const SCRIPT = `
         });
       }
     }
+
+    rememberFile();
   }
 
   // File list click handlers
@@ -367,12 +369,51 @@ export const SCRIPT = `
     });
   });
 
-  activateFile(0);
+  // ── Commit pickers (--serve) ───────────────────────────────────
+  // Changing a picker loads the new comparison in this tab, as a new history
+  // entry. The URL also tracks the selected file, so back/forward return to it.
+  const leftRef = document.getElementById('leftRef');
+  const rightRef = document.getElementById('rightRef');
+
+  function activeFilePath() {
+    const item = Array.from(fileItems).find(i => i.getAttribute('data-file-idx') === String(currentFileIdx));
+    return item ? item.getAttribute('data-path') : null;
+  }
+
+  function rememberFile() {
+    const file = activeFilePath();
+    if (!leftRef || !file) return;
+    const url = new URL(location.href);
+    url.searchParams.set('file', file);
+    history.replaceState(history.state, '', url);
+  }
+
+  if (leftRef && rightRef) {
+    const loadComparison = () => {
+      const params = new URLSearchParams({ left: leftRef.value, right: rightRef.value });
+      const file = activeFilePath();
+      if (file) params.set('file', file);
+      location.assign('?' + params.toString());
+    };
+    leftRef.addEventListener('change', loadComparison);
+    rightRef.addEventListener('change', loadComparison);
+
+    // Show the commits this page was rendered with: on back/forward the
+    // browser can restore picker values that were changed before leaving
+    window.addEventListener('pageshow', () => {
+      [leftRef, rightRef].forEach(select => {
+        const rendered = Array.from(select.options).find(o => o.defaultSelected);
+        if (rendered) select.value = rendered.value;
+      });
+    });
+  }
+
+  activateFile(parseInt(document.body.getAttribute('data-focus-idx') || '0', 10));
 
   // Keyboard navigation (arrow keys, no modifier needed)
   document.addEventListener('keydown', (e) => {
-    // Only handle if not in an input/textarea
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    // Only handle if not in a form control
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
     // Only handle if we have multiple files
     if (fileDiffs.length <= 1) return;
 

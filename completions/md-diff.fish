@@ -17,6 +17,8 @@ complete -c md-diff -l debug -d 'Enable debug output'
 complete -c md-diff -l staged -d 'Compare staged changes to HEAD'
 complete -c md-diff -l compare -x -a '(git branch -a 2>/dev/null | sed "s/^[* ]*//" | sed "s/remotes\///" )' -d 'Compare working dir to branch'
 complete -c md-diff -l pr -x -d 'Compare markdown files in a PR'
+complete -c md-diff -l serve -d 'Serve locally and pick commits in the page'
+complete -c md-diff -l focus -x -a '(__md-diff_fuzzy_files)' -d 'Open on this file'
 complete -c md-diff -l git -x -a '(git for-each-ref --format="%(refname:short)" 2>/dev/null; echo HEAD; echo HEAD~1; echo HEAD~2; echo HEAD~3)' -d 'Compare between git refs'
 
 function __md_diff_git_shortcuts
