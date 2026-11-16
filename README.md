@@ -12,6 +12,7 @@ Side-by-side rich diff viewer for Markdown files. Compare documents with intelli
 - **Stop-Word Absorption** - Prevents noise from isolated articles ("the", "a", "of") appearing as changes
 - **Git Integration** - Compare files between any git refs (commits, branches, tags)
 - **Multi-File Diffs** - Diff all changed markdown files between git refs at once
+- **Mermaid Diagrams** - ` ```mermaid ` blocks show as diagrams on both sides, with an Image/Code toggle and zoom
 - **Two Themes** - Dark mode and Solar (warm sepia) themes with toggle
 - **Synchronized Scrolling** - Left and right panes scroll together
 - **Keyboard Navigation** - Alt+Up/Down to switch between files in multi-file mode
@@ -161,6 +162,12 @@ md-diff --serve --git v1.0 v2.0 README.md
 The dropdowns list recent commits that changed `.md` files; the right one also offers the working directory. Each change re-runs md-diff and loads the result in the same tab, so the browser's back and forward buttons step through earlier comparisons. The selected file stays selected; when it did not change between the picked commits it is still listed, marked "no changes".
 
 `--focus <file>` opens any git-mode page on that file, listing it even when unchanged.
+
+### Mermaid Diagrams
+
+` ```mermaid ` blocks show as diagrams: the old version on the left, the new one on the right. The **Image / Code** toggle in the header switches both sides at once; Code shows the source with the usual inline diff. Click a diagram (or focus it and press Enter) to open it full-window, where the wheel, drag, pinch, `+`/`-`, `0` (100%) and `f` (fit) zoom and pan it.
+
+The page loads Mermaid from cdn.jsdelivr.net the first time it shows a diagram as an image. Without a network connection, or for an invalid diagram, the block shows the error and its code.
 
 ### Output Options
 

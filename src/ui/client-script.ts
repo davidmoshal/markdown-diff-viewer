@@ -487,6 +487,22 @@ export const SCRIPT = `
     });
   }
 
+  // Re-align when block heights change after load (Mermaid diagrams drawn or toggled)
+  let realignPending = false;
+  document.addEventListener('blocksresize', () => {
+    if (realignPending) return;
+    realignPending = true;
+    requestAnimationFrame(() => {
+      realignPending = false;
+      const active = fileDiffs[currentFileIdx];
+      const container = active &&
+        Array.from(active.querySelectorAll('.diff-container')).find(c => c.getClientRects().length > 0);
+      const lp = container && container.querySelector('.left-pane');
+      const rp = container && container.querySelector('.right-pane');
+      if (lp && rp) alignBlocks(lp, rp);
+    });
+  });
+
   // Custom minimap for dual-pane synchronized scrolling
   (function initMinimap() {
     const minimapEl = document.getElementById('minimap');
@@ -658,6 +674,12 @@ export const SCRIPT = `
 
     // Re-render on gap alignment toggle (invalidate cache - heights change)
     gapAlignCheck.addEventListener('change', () => {
+      invalidateCache(currentFileIdx);
+      scheduleRender(true);
+    });
+
+    // Re-render when block heights change (after the re-alignment above)
+    document.addEventListener('blocksresize', () => {
       invalidateCache(currentFileIdx);
       scheduleRender(true);
     });

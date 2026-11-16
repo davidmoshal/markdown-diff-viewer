@@ -32,6 +32,21 @@ function renderBlock(node: RootContent): string {
   return String(result);
 }
 
+/** Marks a side's ```mermaid fence in rendered HTML; pages with one load the Mermaid UI */
+export const MERMAID_BLOCK = "<div class=\"mermaid-block\"";
+
+/**
+ * Wrap a side's HTML for a ```mermaid fence: the page draws the diagram from
+ * the source into the image slot and keeps the code (or code diff) to toggle to.
+ */
+function withMermaid(node: RootContent, html: string): string {
+  if (node.type !== "code" || node.lang?.toLowerCase() !== "mermaid") return html;
+  return `${MERMAID_BLOCK} data-mermaid-source="${escapeHtml(node.value)}">` +
+    "<div class=\"mermaid-image\"></div>" +
+    `<div class="mermaid-code">${html}</div>` +
+    "</div>";
+}
+
 // ─── Inline Diff Rendering ───────────────────────────────────────────────────
 
 /** Get CSS class for absorbable parts */
@@ -221,8 +236,8 @@ const SPACER = '<div class="spacer"></div>';
 
 function equalRow(left: RootContent, right: RootContent): RenderedRow {
   return {
-    leftHtml: renderBlock(left),
-    rightHtml: renderBlock(right),
+    leftHtml: withMermaid(left, renderBlock(left)),
+    rightHtml: withMermaid(right, renderBlock(right)),
     status: "equal",
     leftLine: left.position?.start?.line,
     rightLine: right.position?.start?.line,
@@ -234,8 +249,8 @@ function modifiedRow(pair: ModifiedPair): RenderedRow {
   const leftInner = inlineMarkdown(renderInlineDiffWithGaps(pair.inlineDiff, "left"));
   const rightInner = inlineMarkdown(renderInlineDiffWithGaps(pair.inlineDiff, "right"));
   // Wrap in semantic tag (h1-h6, p, blockquote, etc.) so headings keep their styling
-  const leftContent = wrapWithTag(pair.wrapTag, leftInner);
-  const rightContent = wrapWithTag(pair.wrapTag, rightInner);
+  const leftContent = withMermaid(pair.left, wrapWithTag(pair.wrapTag, leftInner));
+  const rightContent = withMermaid(pair.right, wrapWithTag(pair.wrapTag, rightInner));
   return {
     leftHtml: `<div class="modified-block gap-aligned">${leftContent}</div>`,
     rightHtml: `<div class="modified-block gap-aligned">${rightContent}</div>`,
@@ -247,7 +262,7 @@ function modifiedRow(pair: ModifiedPair): RenderedRow {
 
 /** Render block content, optionally wrapping with line number for copy-with-context */
 function renderBlockContent(node: RootContent, innerHtml?: string, line?: number): string {
-  const content = innerHtml ? wrapInTag(node, innerHtml) : renderBlock(node);
+  const content = withMermaid(node, innerHtml ? wrapInTag(node, innerHtml) : renderBlock(node));
   return line !== undefined ? `<span data-line="${line}">${content}</span>` : content;
 }
 

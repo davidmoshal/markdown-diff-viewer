@@ -1,8 +1,9 @@
-import type { RenderedRow } from "../render/render.js";
+import { MERMAID_BLOCK, type RenderedRow } from "../render/render.js";
 import { themes, themeVars, type ThemeName } from "./themes.js";
 import { MATCHING_LEVEL_NAMES, type MatchingLevel } from "../config.js";
 import { cssText } from "./styles.js";
 import { SCRIPT } from "./client-script.js";
+import { MERMAID_CSS, MERMAID_SCRIPT } from "./mermaid.js";
 
 /** UI Settings that can be pre-configured via CLI */
 export interface UISettings {
@@ -228,6 +229,25 @@ function FileDiffView({
   );
 }
 
+/** True when any file, at any matching level, has a ```mermaid fence */
+function hasMermaid(files: FileDiff[]): boolean {
+  return files.some((f) =>
+    [f.rows, ...Object.values(f.rowsByLevel ?? {})].some((rows) =>
+      rows.some((r) => r.leftHtml.includes(MERMAID_BLOCK) || r.rightHtml.includes(MERMAID_BLOCK)),
+    ),
+  );
+}
+
+/** Shows every Mermaid diagram as an image or as code, on both sides at once */
+function MermaidViewToggle() {
+  return (
+    <div class="mermaid-view-toggle" id="mermaidViewToggle" role="group" aria-label="Show Mermaid diagrams as">
+      <button type="button" data-view="image" aria-pressed="true">Image</button>
+      <button type="button" data-view="code" aria-pressed="false">Code</button>
+    </div>
+  );
+}
+
 function RefSelect({ id, label, options, value }: { id: string; label: string; options: RefOption[]; value: string }) {
   return (
     <select id={id} class="ref-select" aria-label={label} autocomplete="off">
@@ -246,12 +266,14 @@ function Header({
   projectRoot,
   command,
   refPicker,
+  mermaid,
 }: {
   leftTitle: string;
   rightTitle: string;
   projectRoot?: string;
   command?: string;
   refPicker?: RefPicker;
+  mermaid: boolean;
 }) {
   return (
     <header>
@@ -277,6 +299,7 @@ function Header({
           )}
         </span>
         <div class="header-controls">
+          {mermaid && <MermaidViewToggle />}
           <button
             class="settings-toggle"
             id="settingsToggle"
@@ -408,12 +431,18 @@ export function generateMultiFileHtml(files: FileDiff[], options: HtmlOptions): 
   const showSidebar = files.length > 1 || refPicker !== undefined;
   const focusIdx = Math.max(0, files.findIndex((f) => (f.key ?? f.path) === focus));
   const initialLevel: MatchingLevel = uiSettings?.matchLevel ?? "normal";
+  const mermaid = hasMermaid(files);
 
   // Embed initial settings as a data attribute for JS to pick up
   const initialSettings = uiSettings ? JSON.stringify(uiSettings) : undefined;
 
   const page = (
-    <html lang="en" data-theme={theme} data-initial-settings={initialSettings}>
+    <html
+      lang="en"
+      data-theme={theme}
+      data-initial-settings={initialSettings}
+      data-mermaid-view={mermaid ? "image" : undefined}
+    >
       <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -423,6 +452,7 @@ export function generateMultiFileHtml(files: FileDiff[], options: HtmlOptions): 
           href="https://unpkg.com/open-props/open-props.min.css"
         />
         <style>{cssText(darkVars, solarVars) as "safe"}</style>
+        {mermaid && <style>{MERMAID_CSS as "safe"}</style>}
       </head>
       <body class={showSidebar ? "multi-file" : ""} data-focus-idx={String(focusIdx)}>
         {showSidebar && <FileSidebar files={files} activeIdx={focusIdx} />}
@@ -433,6 +463,7 @@ export function generateMultiFileHtml(files: FileDiff[], options: HtmlOptions): 
             projectRoot={projectRoot}
             command={command}
             refPicker={refPicker}
+            mermaid={mermaid}
           />
           {showSidebar && <FilePathDisplay files={files} activeIdx={focusIdx} />}
           {files.map((f, i) => (
@@ -448,6 +479,7 @@ export function generateMultiFileHtml(files: FileDiff[], options: HtmlOptions): 
         <SettingsPanel />
         <div class="settings-overlay" id="settingsOverlay"></div>
         <script>{SCRIPT as "safe"}</script>
+        {mermaid && <script>{MERMAID_SCRIPT as "safe"}</script>}
       </body>
     </html>
   );
