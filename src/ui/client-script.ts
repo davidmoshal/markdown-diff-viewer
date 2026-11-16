@@ -6,6 +6,17 @@ export const SCRIPT = `
 (function() {
   const html = document.documentElement;
 
+  // A file renders one diff container per matching level, all but the active
+  // one hidden; alignment, scroll sync and the minimap work on the shown one
+  function shownPanes(fileDiff) {
+    const level = html.getAttribute('data-match-level');
+    const container = fileDiff.querySelector('.diff-container[data-match-level="' + level + '"]') ||
+      fileDiff.querySelector('.diff-container');
+    return container
+      ? { lp: container.querySelector('.left-pane'), rp: container.querySelector('.right-pane') }
+      : { lp: null, rp: null };
+  }
+
   // ── Settings Panel ──────────────────────────────────────────────
   const settingsPanel = document.getElementById('settingsPanel');
   const settingsOverlay = document.getElementById('settingsOverlay');
@@ -112,12 +123,8 @@ export const SCRIPT = `
     // Defer alignment to next frame to ensure layout is complete after display change
     requestAnimationFrame(() => {
       document.querySelectorAll('.file-diff').forEach(fileDiff => {
-        const visibleContainer = fileDiff.querySelector('.diff-container:not([style*="display: none"])');
-        if (visibleContainer) {
-          const lp = visibleContainer.querySelector('.left-pane');
-          const rp = visibleContainer.querySelector('.right-pane');
-          if (lp && rp) alignBlocks(lp, rp);
-        }
+        const { lp, rp } = shownPanes(fileDiff);
+        if (lp && rp) alignBlocks(lp, rp);
       });
     });
   }
@@ -181,20 +188,17 @@ export const SCRIPT = `
   gapAlignCheck.checked = gapOn;
 
   gapAlignCheck.addEventListener('change', () => {
-    const active = document.querySelector('.file-diff:not([style*="display: none"])') || document.querySelector('.file-diff');
-    const lp = active && active.querySelector('.left-pane');
+    const active = fileDiffs[currentFileIdx];
+    const { lp, rp } = active ? shownPanes(active) : { lp: null, rp: null };
     const scrollRatio = lp ? lp.scrollTop / (lp.scrollHeight - lp.clientHeight || 1) : 0;
 
     const isOn = gapAlignCheck.checked;
     html.setAttribute('data-gap-align', isOn ? 'on' : 'off');
     localStorage.setItem(STORAGE.gapAlign, isOn ? 'on' : 'off');
 
-    if (active) {
-      const rp = active.querySelector('.right-pane');
-      if (lp && rp) {
-        alignBlocks(lp, rp);
-        lp.scrollTop = scrollRatio * (lp.scrollHeight - lp.clientHeight);
-      }
+    if (lp && rp) {
+      alignBlocks(lp, rp);
+      lp.scrollTop = scrollRatio * (lp.scrollHeight - lp.clientHeight);
     }
   });
 
@@ -290,9 +294,10 @@ export const SCRIPT = `
     }
   }
 
-  fileDiffs.forEach(fd => {
-    const lp = fd.querySelector('.left-pane');
-    const rp = fd.querySelector('.right-pane');
+  // Each matching level has its own pair of panes
+  document.querySelectorAll('.diff-container').forEach(container => {
+    const lp = container.querySelector('.left-pane');
+    const rp = container.querySelector('.right-pane');
     if (lp && rp) setupScrollSync(lp, rp);
   });
 
@@ -303,7 +308,7 @@ export const SCRIPT = `
     if (idx !== currentFileIdx) {
       const prevActive = fileDiffs[currentFileIdx];
       if (prevActive) {
-        const prevPane = prevActive.querySelector('.left-pane');
+        const prevPane = shownPanes(prevActive).lp;
         if (prevPane) {
           saveScrollPosition(currentFileIdx, prevPane.scrollTop);
         }
@@ -336,8 +341,7 @@ export const SCRIPT = `
 
     const active = fileDiffs[idx];
     if (active) {
-      const lp = active.querySelector('.left-pane');
-      const rp = active.querySelector('.right-pane');
+      const { lp, rp } = shownPanes(active);
       if (lp && rp) {
         renderStats(computeStats(lp));
 
@@ -437,14 +441,13 @@ export const SCRIPT = `
   // Save scroll position on scroll (debounced)
   let scrollSaveTimeout = null;
   fileDiffs.forEach((fd, idx) => {
-    const lp = fd.querySelector('.left-pane');
-    if (lp) {
+    fd.querySelectorAll('.left-pane').forEach(lp => {
       lp.addEventListener('scroll', () => {
-        if (idx !== currentFileIdx) return;
+        if (idx !== currentFileIdx || lp !== shownPanes(fd).lp) return;
         clearTimeout(scrollSaveTimeout);
         scrollSaveTimeout = setTimeout(() => saveScrollPosition(idx, lp.scrollTop), 200);
       });
-    }
+    });
   });
 
   // Sidebar resize functionality
@@ -495,10 +498,7 @@ export const SCRIPT = `
     requestAnimationFrame(() => {
       realignPending = false;
       const active = fileDiffs[currentFileIdx];
-      const container = active &&
-        Array.from(active.querySelectorAll('.diff-container')).find(c => c.getClientRects().length > 0);
-      const lp = container && container.querySelector('.left-pane');
-      const rp = container && container.querySelector('.right-pane');
+      const { lp, rp } = active ? shownPanes(active) : { lp: null, rp: null };
       if (lp && rp) alignBlocks(lp, rp);
     });
   });
@@ -525,7 +525,7 @@ export const SCRIPT = `
 
     function getActivePane() {
       const active = fileDiffs[currentFileIdx];
-      return active ? active.querySelector('.left-pane') : null;
+      return active ? shownPanes(active).lp : null;
     }
 
     function positionMinimap() {
@@ -676,6 +676,13 @@ export const SCRIPT = `
     gapAlignCheck.addEventListener('change', () => {
       invalidateCache(currentFileIdx);
       scheduleRender(true);
+    });
+
+    // Re-render for the panes of a newly chosen matching level
+    matchLevelSelect.addEventListener('change', () => {
+      invalidateCache(currentFileIdx);
+      scheduleRender(true);
+      attachScrollListener();
     });
 
     // Re-render when block heights change (after the re-alignment above)
